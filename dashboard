@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Weather Dashboard</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; padding: 20px; }
+        .container { max-width: 1200px; margin: 0 auto; background: rgba(255,255,255,0.95); border-radius: 15px; padding: 25px; box-shadow: 0 10px 40px rgba(0,0,0,0.3); }
+        h1 { text-align: center; color: #667eea; margin-bottom: 20px; }
+        .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px; }
+        input, select, button { padding: 10px; border: 2px solid #ddd; border-radius: 5px; font-size: 14px; }
+        button { background: #667eea; color: white; border: none; cursor: pointer; font-weight: bold; }
+        button:hover { background: #5568d3; }
+        .mode-btn { padding: 12px; background: #e9ecef; cursor: pointer; border-radius: 8px; text-align: center; font-weight: bold; }
+        .mode-btn.active { background: #667eea; color: white; }
+        .forecast-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 15px; margin-top: 20px; }
+        .card { background: white; border-radius: 10px; padding: 15px; text-align: center; box-shadow: 0 3px 10px rgba(0,0,0,0.1); }
+        .card:hover { transform: translateY(-3px); box-shadow: 0 5px 15px rgba(0,0,0,0.2); transition: all 0.3s; }
+        .icon { font-size: 3em; margin: 10px 0; }
+        .temp { font-size: 1.3em; font-weight: bold; color: #333; }
+        .params { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin: 15px 0; }
+        .param-check { display: flex; align-items: center; padding: 8px; background: white; border-radius: 5px; }
+        .param-check input { margin-right: 8px; }
+        canvas { background: white; border-radius: 10px; box-shadow: 0 3px 10px rgba(0,0,0,0.1); }
+        .error { background: #fee; color: #c33; padding: 12px; border-radius: 5px; margin-top: 15px; }
+        .tooltip { position: absolute; background: rgba(0,0,0,0.8); color: white; padding: 8px; border-radius: 5px; font-size: 12px; display: none; pointer-events: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🌤️ Weather Dashboard</h1>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px;">
+            <div class="mode-btn active" onclick="setMode('forecast')">📅 Forecast</div>
+            <div class="mode-btn" onclick="setMode('historical')">📊 Historical</div>
+        </div>
+        <div class="controls">
+            <select id="city" onchange="setCity()">
+                <option value="">-- Select City --</option>
+                <option value="44.6995,-73.4529">Plattsburgh, NY</option>
+                <option value="40.7128,-74.0060">New York City</option>
+                <option value="41.8781,-87.6298">Chicago</option>
+                <option value="34.0522,-118.2437">Los Angeles</option>
+                <option value="29.7604,-95.3698">Houston</option>
+                <option value="47.6062,-122.3321">Seattle</option>
+                <option value="25.7617,-80.1918">Miami</option>
+                <option value="51.5074,-0.1278">London</option>
+                <option value="48.8566,2.3522">Paris</option>
+                <option value="35.6762,139.6503">Tokyo</option>
+            </select>
+            <input type="number" id="lat" value="44.6995" placeholder="Latitude">
+            <input type="number" id="lon" value="-73.4529" placeholder="Longitude">
+            <select id="unit"><option value="fahrenheit">°F</option><option value="celsius">°C</option></select>
+            <select id="days"><option>3</option><option>5</option><option selected>7</option><option>10</option></select>
+            <input type="date" id="start" style="display:none;">
+            <input type="date" id="end" style="display:none;">
+            <button onclick="getData()">Get Weather</button>
+        </div>
+        <div id="params" style="display:none;">
+            <div class="params">
+                <label class="param-check"><input type="checkbox" value="temperature_2m" checked> Temperature</label>
+                <label class="param-check"><input type="checkbox" value="relative_humidity_2m"> Humidity</label>
+                <label class="param-check"><input type="checkbox" value="precipitation"> Precipitation</label>
+                <label class="param-check"><input type="checkbox" value="wind_speed_10m"> Wind Speed</label>
+            </div>
+        </div>
+        <div id="forecast" class="forecast-grid"></div>
+        <div id="chart" style="display:none; margin-top:20px;"></div>
+        <div id="error"></div>
+    </div>
+    <div class="tooltip" id="tip"></div>
+
+    <script>
+        let mode = 'forecast';
+        const icons = {0:'☀️',1:'🌤️',2:'⛅',3:'☁️',45:'🌫️',48:'🌫️',51:'🌦️',53:'🌦️',55:'🌧️',61:'🌧️',63:'🌧️',65:'🌧️',71:'🌨️',73:'🌨️',75:'❄️',77:'🌨️',80:'🌦️',81:'⛈️',82:'⛈️',85:'🌨️',86:'❄️',95:'⛈️',96:'⛈️',99:'⛈️'};
+        const desc = {0:'Clear',1:'Mostly Clear',2:'Partly Cloudy',3:'Overcast',45:'Foggy',51:'Light Drizzle',53:'Drizzle',55:'Heavy Drizzle',61:'Light Rain',63:'Rain',65:'Heavy Rain',71:'Light Snow',73:'Snow',75:'Heavy Snow',80:'Showers',81:'Heavy Showers',85:'Snow Showers',95:'Thunderstorm'};
+
+        function setCity() {
+            const val = document.getElementById('city').value;
+            if (val) {
+                const [lat, lon] = val.split(',');
+                document.getElementById('lat').value = lat;
+                document.getElementById('lon').value = lon;
+                getData();
+            }
+        }
+
+        function setMode(m) {
+            mode = m;
+            document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+            event.target.classList.add('active');
+            document.getElementById('days').style.display = m === 'forecast' ? 'block' : 'none';
+            document.getElementById('start').style.display = m === 'historical' ? 'block' : 'none';
+            document.getElementById('end').style.display = m === 'historical' ? 'block' : 'none';
+            document.getElementById('params').style.display = m === 'historical' ? 'block' : 'none';
+            document.getElementById('forecast').style.display = m === 'forecast' ? 'grid' : 'none';
+            document.getElementById('chart').style.display = m === 'historical' ? 'block' : 'none';
+            if (m === 'historical') {
+                const end = new Date();
+                const start = new Date(); start.setDate(end.getDate() - 30);
+                document.getElementById('start').value = start.toISOString().split('T')[0];
+                document.getElementById('end').value = end.toISOString().split('T')[0];
+            }
+            clear();
+        }
+
+        function clear() {
+            document.getElementById('forecast').innerHTML = '';
+            document.getElementById('error').innerHTML = '';
+        }
+
+        async function getData() {
+            clear();
+            const lat = document.getElementById('lat').value;
+            const lon = document.getElementById('lon').value;
+            const unit = document.getElementById('unit').value;
+            if (!lat || !lon) { showError('Enter coordinates'); return; }
+            
+            // Show loading message
+            const target = mode === 'forecast' ? document.getElementById('forecast') : document.getElementById('chart');
+            if (mode === 'forecast') {
+                target.innerHTML = '<div style="text-align:center;padding:40px;color:#667eea;font-size:1.2em;">Loading weather data...</div>';
+            }
+            
+            try {
+                if (mode === 'forecast') await getForecast(lat, lon, unit);
+                else await getHistorical(lat, lon, unit);
+            } catch (e) { 
+                showError(e.message); 
+                console.error('API Error:', e);
+            }
+        }
+
+        async function getForecast(lat, lon, unit) {
+            const days = document.getElementById('days').value;
+            const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=weather_code,temperature_2m_max,temperature_2m_min&temperature_unit=${unit}&timezone=auto&forecast_days=${days}`;
+            try {
+                const res = await window.fetch(url);
+                if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+                const data = await res.json();
+                if (data.error) throw new Error(data.reason || 'API Error');
+                showForecast(data, unit);
+            } catch (err) {
+                throw new Error(`Failed to fetch forecast: ${err.message}`);
+            }
+        }
+
+        function showForecast(data, unit) {
+            const container = document.getElementById('forecast');
+            const sym = unit === 'fahrenheit' ? '°F' : '°C';
+            data.daily.time.forEach((date, i) => {
+                const code = data.daily.weather_code[i];
+                const max = Math.round(data.daily.temperature_2m_max[i]);
+                const min = Math.round(data.daily.temperature_2m_min[i]);
+                const d = new Date(date);
+                const card = document.createElement('div');
+                card.className = 'card';
+                card.innerHTML = `
+                    <div style="font-weight:bold;color:#667eea;margin-bottom:8px;">${d.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})}</div>
+                    <div class="icon">${icons[code]||'🌡️'}</div>
+                    <div class="temp">${max}${sym}</div>
+                    <div style="color:#666;font-size:0.9em;">Low: ${min}${sym}</div>
+                    <div style="color:#888;font-size:0.85em;margin-top:5px;">${desc[code]||'Unknown'}</div>
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        async function getHistorical(lat, lon, unit) {
+            const start = document.getElementById('start').value;
+            const end = document.getElementById('end').value;
+            if (!start || !end) { showError('Select dates'); return; }
+            const params = Array.from(document.querySelectorAll('.param-check input:checked')).map(cb => cb.value);
+            if (!params.length) { showError('Select parameters'); return; }
+            const url = `https://archive-api.open-meteo.com/v1/archive?latitude=${lat}&longitude=${lon}&start_date=${start}&end_date=${end}&hourly=${params.join(',')}&temperature_unit=${unit}&timezone=auto`;
+            try {
+                const res = await window.fetch(url);
+                if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+                const data = await res.json();
+                if (data.error) throw new Error(data.reason || 'API Error');
+                drawChart(data, params, unit);
+            } catch (err) {
+                throw new Error(`Failed to fetch historical data: ${err.message}`);
+            }
+        }
+
+        function drawChart(data, params, unit) {
+            const container = d3.select('#chart').html('');
+            const margin = {t:30,r:120,b:50,l:50}, width = 1100 - margin.l - margin.r, height = 400 - margin.t - margin.b;
+            const svg = container.append('svg').attr('width',width+margin.l+margin.r).attr('height',height+margin.t+margin.b)
+                .append('g').attr('transform',`translate(${margin.l},${margin.t})`);
+            const colors = ['#667eea','#764ba2','#f093fb','#4facfe','#00f2fe','#43e97b'];
+            const parseTime = d3.utcParse('%Y-%m-%dT%H:%M');
+            const times = data.hourly.time.map(t => parseTime(t));
+            
+            const x = d3.scaleTime().domain(d3.extent(times)).range([0,width]);
+            const yScales = {};
+            
+            params.forEach((p,i) => {
+                const vals = data.hourly[p].filter(v => v !== null);
+                yScales[p] = d3.scaleLinear().domain([d3.min(vals)*0.95, d3.max(vals)*1.05]).range([height,0]);
+                const line = d3.line().defined((d,idx) => data.hourly[p][idx] !== null)
+                    .x((d,idx) => x(times[idx])).y((d,idx) => yScales[p](data.hourly[p][idx])).curve(d3.curveMonotoneX);
+                svg.append('path').datum(data.hourly[p]).attr('fill','none')
+                    .attr('stroke',colors[i]).attr('stroke-width',2).attr('d',line);
+            });
+            
+            svg.append('g').attr('transform',`translate(0,${height})`).call(d3.axisBottom(x).ticks(6));
+            svg.append('g').call(d3.axisLeft(yScales[params[0]]));
+            
+            const legend = svg.append('g').attr('transform',`translate(${width+10},0)`);
+            params.forEach((p,i) => {
+                const g = legend.append('g').attr('transform',`translate(0,${i*20})`);
+                g.append('rect').attr('width',15).attr('height',15).attr('fill',colors[i]);
+                g.append('text').attr('x',20).attr('y',12).style('font-size','12px').text(formatParam(p));
+            });
+            
+            const focus = svg.append('g').style('display','none');
+            focus.append('line').attr('stroke','#999').attr('stroke-dasharray','3,3').attr('y1',0).attr('y2',height);
+            const tooltip = d3.select('#tip');
+            
+            svg.append('rect').attr('width',width).attr('height',height).style('fill','none').style('pointer-events','all')
+                .on('mousemove', function(event) {
+                    const [mx] = d3.pointer(event);
+                    const x0 = x.invert(mx);
+                    const bisect = d3.bisector(d => d).left;
+                    const i = bisect(times, x0);
+                    if (i < times.length) {
+                        focus.style('display',null).attr('transform',`translate(${x(times[i])},0)`);
+                        let html = `<b>${times[i].toLocaleString()}</b><br>`;
+                        params.forEach(p => {
+                            const v = data.hourly[p][i];
+                            if (v !== null) html += `${formatParam(p)}: ${v.toFixed(1)}${getUnit(p,unit)}<br>`;
+                        });
+                        tooltip.html(html).style('display','block').style('left',(event.pageX+10)+'px').style('top',(event.pageY-10)+'px');
+                    }
+                })
+                .on('mouseout', () => { focus.style('display','none'); tooltip.style('display','none'); });
+        }
+
+        function formatParam(p) {
+            return {temperature_2m:'Temp',relative_humidity_2m:'Humidity',precipitation:'Precip',wind_speed_10m:'Wind'}[p]||p;
+        }
+
+        function getUnit(p, t) {
+            return {temperature_2m:t==='fahrenheit'?'°F':'°C',relative_humidity_2m:'%',precipitation:'mm',wind_speed_10m:'km/h'}[p]||'';
+        }
+
+        function showError(msg) {
+            document.getElementById('error').innerHTML = `<div class="error"><b>Error:</b> ${msg}</div>`;
+        }
+
+        window.onload = () => getData();
+    </script>
+</body>
+</html>
